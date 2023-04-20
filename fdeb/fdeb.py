@@ -1,24 +1,6 @@
 import numpy as np
 
 
-def interleave(x0, x1):
-    """Interleave two arrays along the first axis."""
-    assert x0.shape[1:] == x1.shape[1:], "Incompatible shapes!"
-
-    y = np.empty((x0.shape[0] + x1.shape[0], *x0.shape[1:]), dtype=x0.dtype)
-    y[::2] = x0
-    y[1::2] = x1
-    return y
-
-
-def subdivide_edge1(e, axis=1):
-    e = np.swapaxes(e, 0, axis)
-    midpoints = np.array([(e0 + e1) / 2 for e0, e1 in zip(e[1:], e[:-1])])
-    e = interleave(e, midpoints)
-    e = np.swapaxes(e, axis, 0)
-    return e
-
-
 def subdivide_edge(edges, num_points):
     segment_vecs = edges[:, 1:] - edges[:, :-1]
     segment_lens = np.linalg.norm(segment_vecs, axis=-1)
