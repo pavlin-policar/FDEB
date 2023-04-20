@@ -19,7 +19,7 @@ def subdivide_edge(e, axis=1):
     return e
 
 
-def compute_forces(e, kp):
+def compute_forces(e, e_compat, kp):
     # Left-mid spring direction
     v_spring_l = e[:, :-1, :] - e[:, 1:, :]
     v_spring_l = np.concatenate(
@@ -41,7 +41,9 @@ def compute_forces(e, kp):
 
     # Electrostatic force
     v_electro = np.expand_dims(e, 1) - np.expand_dims(e, 0)
-    f_electro = 1 / (np.sqrt(np.sum(v_electro ** 2, axis=-1, keepdims=True)) + 1e-8)
+    np.fill_diagonal(e_compat, 0)  # No self-interactions
+    e_compat = np.expand_dims(e_compat, (2, 3))
+    f_electro = e_compat / (np.sqrt(np.sum(v_electro ** 2, axis=-1, keepdims=True)) + 1e-8)
 
     F_electro = np.sum(f_electro * v_electro, axis=0)
 
@@ -52,20 +54,66 @@ def compute_forces(e, kp):
     return F
 
 
+def compute_edge_compatibility(edges):
+    vec = edges[:, -1] - edges[:, 0]
+    vec_norm = np.sum(vec ** 2, axis=1, keepdims=True)
+
+    # Angle comptability
+    compat_angle = (vec @ vec.T) / (vec_norm @ vec_norm.T + 1e-8)
+
+    # Length compatibility
+    l_avg = (vec_norm + vec_norm.T) / 2
+    compat_length = 2 / (
+        l_avg / (np.minimum(vec_norm, vec_norm.T) + 1e-8) +
+        np.maximum(vec_norm, vec_norm.T) / (l_avg + 1e-8) +
+        1e-8
+    )
+
+    # Distance compatibility
+    midpoint = (edges[:, 0] + edges[:, -1]) / 2
+    midpoint_dist = np.sqrt(np.sum((midpoint[None, :] - midpoint[:, None]) ** 2, axis=-1))
+    dist_compat = l_avg / (l_avg + midpoint_dist + 1e-8)
+
+    # Visibility compatibility
+    # Project point endpoints onto the line segment:
+    #   t = a*p / ab*ab
+    #   proj = a + t*ab
+    ap = edges[None, ...] - edges[:, None, None, 0]
+    t = np.sum(ap * vec[:, None, None, :], axis=-1) / (np.sum(vec ** 2, axis=-1)[:, None, None] + 1e-8)
+    I = edges[:, None, 0, None] + t[..., None] * vec[:, None, None, :]
+
+    i0, i1 = I[..., 0, :], I[..., 1, :]
+    Im = (i0 + i1) / 2
+
+    denom = np.sqrt(np.sum((i0 - i1) ** 2, axis=-1))
+    num = 2 * np.linalg.norm(midpoint[:, None, ...] - Im, axis=-1)
+
+    visibility_compat = np.maximum(0, 1 - num / (denom + 1e-8))
+    visibility_compat = np.minimum(visibility_compat, visibility_compat.T)
+
+    # Combine compatibility scores
+    return compat_angle * compat_length * dist_compat * visibility_compat
+
+
 def fdeb(edges, K=0.1, n_iter=50, n_iter_reduction=2 / 3, lr=0.04, lr_reduction=0.5, num_cycles=6):
-    initial_edge_lengths = np.sum((edges[:, 0] - edges[:, -1]) ** 2, axis=1)
+    initial_edge_vecs = edges[:, 0] - edges[:, -1]
+
+    initial_edge_lengths = np.sum(initial_edge_vecs ** 2, axis=1, keepdims=True)
     # Add a small value to avoid division by zero
     initial_edge_lengths += 1
+
+    # Compute edge compatibilities
+    edge_compatibilities = compute_edge_compatibility(edges)
 
     for cycle in range(num_cycles):
         edges = subdivide_edge(edges)
 
         num_segments = edges.shape[1] - 1
         kp = K / initial_edge_lengths * num_segments
-        kp = np.expand_dims(kp, (1, 2))
+        kp = np.expand_dims(kp, 1)
 
         for epoch in range(n_iter):
-            F = compute_forces(edges, kp)
+            F = compute_forces(edges, edge_compatibilities, kp)
             edges += F * lr
 
         n_iter = int(np.ceil(n_iter * n_iter_reduction))
