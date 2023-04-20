@@ -1,11 +1,29 @@
 import numpy as np
 
 
-def subdivide_edge(edges, num_points):
+def subdivide_edge(edges: np.ndarray, num_points: int) -> np.ndarray:
+    """Subdivide edges into `num_points` segments.
+
+     The points being uniformly distributed, as if walking along the line.
+
+    Parameters
+    ----------
+    edges : array-like, shape (n_edges, current_points, 2)
+        The edges to subdivide.
+    num_points : int
+        The number of points to generate along each edge.
+
+    Returns
+    -------
+    new_points : array-like, shape (n_edges, num_points, 2)
+
+    """
     segment_vecs = edges[:, 1:] - edges[:, :-1]
     segment_lens = np.linalg.norm(segment_vecs, axis=-1)
     cum_segment_lens = np.cumsum(segment_lens, axis=1)
-    cum_segment_lens = np.hstack([np.zeros((cum_segment_lens.shape[0], 1)), cum_segment_lens])
+    cum_segment_lens = np.hstack(
+        [np.zeros((cum_segment_lens.shape[0], 1)), cum_segment_lens]
+    )
 
     total_lens = cum_segment_lens[:, -1]
 
@@ -15,9 +33,8 @@ def subdivide_edge(edges, num_points):
     # Which segment should the new point be interpolated on
     i = np.argmax(desired_lens[:, None] < cum_segment_lens[..., None], axis=1)
     # At what percentage of the segment does this new point actually appear
-    pct = (
-        (desired_lens - np.take_along_axis(cum_segment_lens, i - 1, axis=-1)) /
-        (np.take_along_axis(segment_lens, i - 1, axis=-1) + 1e-8)
+    pct = (desired_lens - np.take_along_axis(cum_segment_lens, i - 1, axis=-1)) / (
+        np.take_along_axis(segment_lens, i - 1, axis=-1) + 1e-8
     )
 
     new_points = []
@@ -32,7 +49,20 @@ def subdivide_edge(edges, num_points):
     return new_points
 
 
-def compute_edge_compatibility(edges):
+def compute_edge_compatibility(edges: np.ndarray) -> np.ndarray:
+    """Compute pairwise-edge compatibility scores.
+
+    Parameters
+    ----------
+    edges : array-like, shape (n_edges, n_points, 2)
+        The edges to compute compatibility scores for.
+
+    Returns
+    -------
+    compat : array-like, shape (n_edges, n_edges)
+        The pairwise edge compatibility scores.
+
+    """
     vec = edges[:, -1] - edges[:, 0]
     vec_norm = np.linalg.norm(vec, axis=1, keepdims=True)
 
@@ -42,9 +72,9 @@ def compute_edge_compatibility(edges):
     # Length compatibility
     l_avg = (vec_norm + vec_norm.T) / 2
     compat_length = 2 / (
-        l_avg / (np.minimum(vec_norm, vec_norm.T) + 1e-8) +
-        np.maximum(vec_norm, vec_norm.T) / (l_avg + 1e-8) +
-        1e-8
+        l_avg / (np.minimum(vec_norm, vec_norm.T) + 1e-8)
+        + np.maximum(vec_norm, vec_norm.T) / (l_avg + 1e-8)
+        + 1e-8
     )
 
     # Distance compatibility
@@ -57,7 +87,9 @@ def compute_edge_compatibility(edges):
     #   t = a*p / ab*ab
     #   proj = a + t*ab
     ap = edges[None, ...] - edges[:, None, None, 0]
-    t = np.sum(ap * vec[:, None, None, :], axis=-1) / (np.sum(vec ** 2, axis=-1)[:, None, None] + 1e-8)
+    t = np.sum(ap * vec[:, None, None, :], axis=-1) / (
+        np.sum(vec**2, axis=-1)[:, None, None] + 1e-8
+    )
     I = edges[:, None, 0, None] + t[..., None] * vec[:, None, None, :]
 
     i0, i1 = I[..., 0, :], I[..., 1, :]
@@ -73,7 +105,24 @@ def compute_edge_compatibility(edges):
     return compat_angle * compat_length * compat_dist * compat_visibility
 
 
-def compute_forces(e, e_compat, kp):
+def compute_forces(e: np.ndarray, e_compat: np.ndarray, kp: np.ndarray) -> np.ndarray:
+    """Compute forces on each edge point.
+
+    Parameters
+    ----------
+    e : array-like, shape (n_edges, n_points, 2)
+        The edge points.
+    e_compat : array-like, shape (n_edges, n_edges)
+        The pairwise edge compatibility scores.
+    kp : array-like, shape (n_edges, 1, 1)
+        The spring constant for each edge.
+
+    Returns
+    -------
+    F : array-like, shape (n_edges, n_points, 2)
+        The forces on each edge point.
+
+    """
     # Left-mid spring direction
     v_spring_l = e[:, :-1] - e[:, 1:]
     v_spring_l = np.concatenate(
@@ -88,8 +137,8 @@ def compute_forces(e, e_compat, kp):
         axis=1,
     )
 
-    f_spring_l = np.sum(v_spring_l ** 2, axis=-1, keepdims=True)
-    f_spring_r = np.sum(v_spring_r ** 2, axis=-1, keepdims=True)
+    f_spring_l = np.sum(v_spring_l**2, axis=-1, keepdims=True)
+    f_spring_r = np.sum(v_spring_r**2, axis=-1, keepdims=True)
 
     F_spring = kp * (f_spring_l * v_spring_l + f_spring_r * v_spring_r)
 
@@ -106,7 +155,17 @@ def compute_forces(e, e_compat, kp):
     return F
 
 
-def fdeb(edges, K=0.1, n_iter=50, n_iter_reduction=2 / 3, lr=0.04, lr_reduction=0.5, n_cycles=6, initial_segpoints=1, segpoint_increase=2):
+def fdeb(
+    edges: np.ndarray,
+    K: float = 0.1,
+    n_iter: int = 50,
+    n_iter_reduction: float = 2 / 3,
+    lr: float = 0.04,
+    lr_reduction: float = 0.5,
+    n_cycles: int = 6,
+    initial_segpoints: int = 1,
+    segpoint_increase: float = 2,
+) -> np.ndarray:
     initial_edge_vecs = edges[:, 0] - edges[:, -1]
 
     initial_edge_lengths = np.linalg.norm(initial_edge_vecs, axis=-1, keepdims=True)
@@ -119,7 +178,7 @@ def fdeb(edges, K=0.1, n_iter=50, n_iter_reduction=2 / 3, lr=0.04, lr_reduction=
 
     for cycle in range(n_cycles):
         edges = subdivide_edge(edges, num_segments + 2)  # Add 2 for endpoints
-        num_segments *= segpoint_increase
+        num_segments = int(np.ceil(num_segments * segpoint_increase))
 
         kp = K / (initial_edge_lengths * num_segments + 1e-8)
         kp = kp[..., None]
