@@ -11,12 +11,43 @@ def interleave(x0, x1):
     return y
 
 
-def subdivide_edge(e, axis=1):
+def subdivide_edge1(e, axis=1):
     e = np.swapaxes(e, 0, axis)
     midpoints = np.array([(e0 + e1) / 2 for e0, e1 in zip(e[1:], e[:-1])])
     e = interleave(e, midpoints)
     e = np.swapaxes(e, axis, 0)
     return e
+
+
+def subdivide_edge(edges, num_points):
+    segment_vecs = edges[:, 1:] - edges[:, :-1]
+    segment_lens = np.linalg.norm(segment_vecs, axis=-1)
+    cum_segment_lens = np.cumsum(segment_lens, axis=1)
+    cum_segment_lens = np.hstack([np.zeros((cum_segment_lens.shape[0], 1)), cum_segment_lens])
+
+    total_lens = cum_segment_lens[:, -1]
+
+    # At which lengths do we want to generate new points
+    t = np.linspace(0, 1, num=num_points, endpoint=True)
+    desired_lens = t * total_lens[:, None]
+    # Which segment should the new point be interpolated on
+    i = np.argmax(desired_lens[:, None] < cum_segment_lens[..., None], axis=1)
+    # At what percentage of the segment does this new point actually appear
+    pct = (
+        (desired_lens - np.take_along_axis(cum_segment_lens, i - 1, axis=-1)) /
+        (np.take_along_axis(segment_lens, i - 1, axis=-1) + 1e-8)
+    )
+
+    new_points = []
+    for j in range(i.shape[0]):
+        ej = edges[j]
+        ij = i[j]
+        pctj = pct[j]
+        pxj = (1 - pctj[:, None]) * ej[ij - 1] + pctj[:, None] * ej[ij]
+        new_points.append(pxj)
+    new_points = np.array(new_points)
+
+    return new_points
 
 
 def compute_edge_compatibility(edges):
@@ -93,21 +124,22 @@ def compute_forces(e, e_compat, kp):
     return F
 
 
-def fdeb(edges, K=0.1, n_iter=50, n_iter_reduction=2 / 3, lr=0.04, lr_reduction=0.5, n_cycles=6):
+def fdeb(edges, K=0.1, n_iter=50, n_iter_reduction=2 / 3, lr=0.04, lr_reduction=0.5, n_cycles=6, initial_segpoints=1, segpoint_increase=2):
     initial_edge_vecs = edges[:, 0] - edges[:, -1]
 
-    initial_edge_lengths = np.sum(initial_edge_vecs ** 2, axis=1, keepdims=True)
-    # Add a small value to avoid division by zero
-    initial_edge_lengths += 1
+    initial_edge_lengths = np.linalg.norm(initial_edge_vecs, axis=-1, keepdims=True)
 
     # Compute edge compatibilities
     edge_compatibilities = compute_edge_compatibility(edges)
+    # edge_compatibilities = (edge_compatibilities > 0.6).astype(np.float32)
+
+    num_segments = initial_segpoints
 
     for cycle in range(n_cycles):
-        edges = subdivide_edge(edges)
+        edges = subdivide_edge(edges, num_segments + 2)  # Add 2 for endpoints
+        num_segments *= segpoint_increase
 
-        num_segments = edges.shape[1] - 1
-        kp = K / (initial_edge_lengths * num_segments)
+        kp = K / (initial_edge_lengths * num_segments + 1e-8)
         kp = kp[..., None]
 
         for epoch in range(n_iter):
