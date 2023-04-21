@@ -163,6 +163,45 @@ def fdeb(
     initial_segpoints: int = 1,
     segpoint_increase: float = 2,
 ) -> np.ndarray:
+    """Run the Force-Directed Edge Bundling algorithm.
+
+    Parameters
+    ----------
+    edges: array-like, shape (n_edges, 2, 2)
+        The edge points.
+    K: float
+        The spring constant.
+    n_iter: int
+        The number of iterations to run in the first cycle.
+    n_iter_reduction: float
+        The factor by which to reduce the number of iterations in each cycle.
+    lr: float
+        The learning rate.
+    lr_reduction: float
+        The factor by which to reduce the learning rate in each cycle.
+    n_cycles: float
+        The number of cycles to run the algorithm for. In each cycle, the number
+        of segments is increased by a factor `segpoint_increase`, e.g., from 1
+        to 2 to 4 to 8, etc., and the learning rate is reduced by a factor of
+        `lr_reduction`. Additionally, each cycle runs for a factor of
+        `n_iter_reduction` less than the previous cycle.
+    initial_segpoints: int
+        The initial number of segments to start with, e.g., 1 corresponds to a
+        single midpoint.
+    segpoint_increase: float
+        The factor by which to increase the number of segments in each cycle.
+
+    Returns
+    -------
+    edges: array-like, shape (n_edges, n_segments + 1, 2)
+
+    References
+    ----------
+    .. [1] Holten, Danny, and Jarke J. Van Wijk. "Force‐directed edge bundling
+       for graph visualization." Computer Graphics Forum. Vol. 28. No. 3.
+       Oxford, UK: Blackwell Publishing Ltd, 2009.
+
+    """
     initial_edge_vecs = edges[:, 0] - edges[:, -1]
 
     initial_edge_lengths = np.linalg.norm(initial_edge_vecs, axis=-1, keepdims=True)
