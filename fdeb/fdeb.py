@@ -37,14 +37,11 @@ def subdivide_edge(edges: np.ndarray, num_points: int) -> np.ndarray:
         np.take_along_axis(segment_lens, i - 1, axis=-1) + 1e-8
     )
 
-    new_points = []
-    for j in range(i.shape[0]):
-        ej = edges[j]
-        ij = i[j]
-        pctj = pct[j]
-        pxj = (1 - pctj[:, None]) * ej[ij - 1] + pctj[:, None] * ej[ij]
-        new_points.append(pxj)
-    new_points = np.array(new_points)
+    row_indices = np.arange(edges.shape[0])[:, None]
+    new_points = (
+        (1 - pct[..., None]) * edges[row_indices, i - 1]
+        + pct[..., None] * edges[row_indices, i]
+    )
 
     return new_points
 
