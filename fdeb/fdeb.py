@@ -155,13 +155,14 @@ def compute_forces(e: np.ndarray, e_compat: np.ndarray, kp: np.ndarray) -> np.nd
 def fdeb(
     edges: np.ndarray,
     K: float = 0.1,
-    n_iter: int = 50,
+    n_iter: int = 60,
     n_iter_reduction: float = 2 / 3,
     lr: float = 0.04,
     lr_reduction: float = 0.5,
     n_cycles: int = 6,
     initial_segpoints: int = 1,
     segpoint_increase: float = 2,
+    compat_threshold: float = 0.5,
 ) -> np.ndarray:
     """Run the Force-Directed Edge Bundling algorithm.
 
@@ -190,6 +191,9 @@ def fdeb(
         single midpoint.
     segpoint_increase: float
         The factor by which to increase the number of segments in each cycle.
+    compat_threshold: float
+        Edge interactions with compatibility lower than a specified threshold
+        are ignored.
 
     Returns
     -------
@@ -208,7 +212,7 @@ def fdeb(
 
     # Compute edge compatibilities
     edge_compatibilities = compute_edge_compatibility(edges)
-    # edge_compatibilities = (edge_compatibilities > 0.6).astype(np.float32)
+    edge_compatibilities = (edge_compatibilities > compat_threshold).astype(np.float32)
 
     num_segments = initial_segpoints
 
